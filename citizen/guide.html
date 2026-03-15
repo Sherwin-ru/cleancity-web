@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Segregation Guide — Learn how to properly sort and dispose of 30+ waste items.">
+  <title>CleanCity — Segregation Guide</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="scanner.html">SCAN</a>
+      <a href="schedule.html">SCHEDULE</a>
+      <a href="track.html">TRACK</a>
+      <a href="guide.html" style="background:rgba(255,255,255,0.18);">GUIDE</a>
+      <a href="rewards.html">REWARDS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-24">SEGREGATION GUIDE</h1>
+
+    <!-- Search -->
+    <input type="text" class="input mb-20" id="search-input" placeholder="🔍 Search waste items..." oninput="filterItems()">
+
+    <!-- Filter Tabs -->
+    <div class="toggle-group mb-24">
+      <button class="toggle-btn active" onclick="setFilter('All')" id="filter-All">ALL</button>
+      <button class="toggle-btn" onclick="setFilter('Solid')" id="filter-Solid">🔵 SOLID</button>
+      <button class="toggle-btn" onclick="setFilter('Bio-waste')" id="filter-Bio-waste">🟢 BIO</button>
+      <button class="toggle-btn" onclick="setFilter('E-waste')" id="filter-E-waste">🔴 E-WASTE</button>
+    </div>
+
+    <!-- Items Grid -->
+    <div class="grid-3" id="items-grid">
+      <p style="text-align:center;">Loading guide...</p>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <script>
+    requireAuth(function(user) {});
+
+    var guideItems = [];
+    var activeFilter = 'All';
+
+    // Load items from guide.json
+    fetch('../data/guide.json')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        guideItems = data;
+        renderItems();
+      })
+      .catch(function(e) {
+        document.getElementById('items-grid').innerHTML = '<p>Failed to load guide. Please refresh.</p>';
+      });
+
+    function setFilter(filter) {
+      activeFilter = filter;
+      ['All', 'Solid', 'Bio-waste', 'E-waste'].forEach(function(f) {
+        var btn = document.getElementById('filter-' + f);
+        btn.className = 'toggle-btn' + (f === filter ? ' active' : '');
+      });
+      filterItems();
+    }
+
+    function filterItems() {
+      var search = document.getElementById('search-input').value.toLowerCase();
+      var filtered = guideItems.filter(function(item) {
+        var matchesFilter = activeFilter === 'All' || item.category === activeFilter;
+        var matchesSearch = !search || item.item.toLowerCase().includes(search) || item.tip.toLowerCase().includes(search);
+        return matchesFilter && matchesSearch;
+      });
+      renderItems(filtered);
+    }
+
+    function renderItems(items) {
+      items = items || guideItems;
+      var grid = document.getElementById('items-grid');
+
+      if (items.length === 0) {
+        grid.innerHTML = '<div class="card text-center" style="grid-column:1/-1;"><p>No items match your search.</p></div>';
+        return;
+      }
+
+      var html = '';
+      items.forEach(function(item) {
+        var badgeClass, badgeLabel;
+        if (item.category === 'Solid') {
+          badgeClass = 'badge-solid';
+          badgeLabel = 'SOLID';
+        } else if (item.category === 'Bio-waste') {
+          badgeClass = 'badge-bio';
+          badgeLabel = 'BIO-WASTE';
+        } else {
+          badgeClass = 'badge-ewaste';
+          badgeLabel = 'E-WASTE';
+        }
+
+        html += '<div class="card">' +
+          '<h3 style="margin-bottom:8px;">' + item.item + '</h3>' +
+          '<span class="' + badgeClass + '" style="margin-bottom:10px;">' + badgeLabel + '</span>' +
+          '<p style="margin-top:10px;">' + item.tip + '</p>' +
+          '</div>';
+      });
+
+      grid.innerHTML = html;
+    }
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

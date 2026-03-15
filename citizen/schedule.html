@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity — Schedule a waste pickup in your area. Choose waste type, quantity, location, and time.">
+  <title>CleanCity — Schedule Pickup</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="scanner.html">SCAN</a>
+      <a href="schedule.html" style="background:rgba(255,255,255,0.18);">SCHEDULE</a>
+      <a href="track.html">TRACK</a>
+      <a href="guide.html">GUIDE</a>
+      <a href="rewards.html">REWARDS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-32">SCHEDULE PICKUP</h1>
+
+    <!-- Step 1: Waste Type -->
+    <h2 class="mb-12">STEP 1 — WASTE TYPE</h2>
+    <div class="grid-3 mb-32">
+      <div class="card text-center" style="cursor:pointer; padding:28px;" id="type-Solid" onclick="selectWasteType('Solid')">
+        <span style="font-size:32px;">🔵</span>
+        <h3 style="margin-top:8px;">SOLID WASTE</h3>
+      </div>
+      <div class="card text-center" style="cursor:pointer; padding:28px;" id="type-Bio-waste" onclick="selectWasteType('Bio-waste')">
+        <span style="font-size:32px;">🟢</span>
+        <h3 style="margin-top:8px;">BIO-WASTE</h3>
+      </div>
+      <div class="card text-center" style="cursor:pointer; padding:28px;" id="type-E-waste" onclick="selectWasteType('E-waste')">
+        <span style="font-size:32px;">🔴</span>
+        <h3 style="margin-top:8px;">E-WASTE</h3>
+      </div>
+    </div>
+
+    <!-- Step 2: Quantity -->
+    <h2 class="mb-12">STEP 2 — QUANTITY (KG)</h2>
+    <div class="mb-32">
+      <div class="stepper">
+        <button onclick="changeQuantity(-1)">−</button>
+        <div class="stepper-value" id="quantity-value">1</div>
+        <button onclick="changeQuantity(1)">+</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Location -->
+    <h2 class="mb-12">STEP 3 — LOCATION</h2>
+    <p class="mb-12">Click on the map to set your pickup location, or use the button below.</p>
+    <div id="schedule-map" class="map-container mb-12" style="height:400px;"></div>
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;" class="mb-12">
+      <button class="btn-yellow" onclick="useMyLocation()">📍 USE MY LOCATION</button>
+      <span id="location-text" style="font-size:14px; color:var(--muted);">No location selected</span>
+    </div>
+    <p id="coords-display" style="font-size:13px; color:var(--muted);" class="mb-32"></p>
+
+    <!-- Step 4: Date & Time -->
+    <h2 class="mb-12">STEP 4 — DATE & TIME</h2>
+    <div class="mb-32">
+      <input type="datetime-local" id="schedule-datetime" class="input" style="max-width:360px;">
+    </div>
+
+    <!-- Submit -->
+    <button class="btn-primary w-full" id="submit-btn" onclick="submitRequest()" style="font-size:18px; padding:16px;">
+      ✅ SUBMIT PICKUP REQUEST
+    </button>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="../js/maps.js"></script>
+
+  <script>
+    var selectedType = null;
+    var quantity = 1;
+    var selectedLat = null;
+    var selectedLng = null;
+    var selectedAddress = '';
+    var scheduleMap = null;
+    var locationMarker = null;
+    var currentUser = null;
+
+    requireAuth(function(user) {
+      currentUser = user;
+      console.log('Auth ready, user:', user.id);
+    });
+
+    // Init map centered on India
+    scheduleMap = initMap('schedule-map', 20.5937, 78.9629, 5);
+
+    // Set default datetime to now + 1 hour
+    var now = new Date();
+    now.setHours(now.getHours() + 1);
+    now.setMinutes(0);
+    document.getElementById('schedule-datetime').value = now.toISOString().slice(0, 16);
+
+    // Click map to set location
+    scheduleMap.on('click', async function(e) {
+      selectedLat = e.latlng.lat;
+      selectedLng = e.latlng.lng;
+
+      if (locationMarker) {
+        scheduleMap.removeLayer(locationMarker);
+      }
+      locationMarker = addPickupMarker(scheduleMap, selectedLat, selectedLng, '📍');
+
+      document.getElementById('coords-display').textContent = 'Lat: ' + selectedLat.toFixed(5) + ' | Lng: ' + selectedLng.toFixed(5);
+      document.getElementById('location-text').textContent = 'Loading address...';
+
+      selectedAddress = await reverseGeocode(selectedLat, selectedLng);
+      document.getElementById('location-text').textContent = selectedAddress;
+    });
+
+    function selectWasteType(type) {
+      selectedType = type;
+      ['Solid', 'Bio-waste', 'E-waste'].forEach(function(t) {
+        var el = document.getElementById('type-' + t);
+        if (t === type) {
+          var colors = { 'Solid': 'var(--blue)', 'Bio-waste': 'var(--green)', 'E-waste': 'var(--red)' };
+          el.style.background = colors[t];
+          el.style.color = 'white';
+          el.style.transform = 'translate(4px, 4px)';
+          el.style.boxShadow = 'inset 3px 3px 0 rgba(0,0,0,0.2)';
+        } else {
+          el.style.background = 'var(--white)';
+          el.style.color = 'var(--black)';
+          el.style.transform = 'none';
+          el.style.boxShadow = 'var(--shadow)';
+        }
+      });
+    }
+
+    function changeQuantity(delta) {
+      quantity = Math.max(1, Math.min(100, quantity + delta));
+      document.getElementById('quantity-value').textContent = quantity;
+    }
+
+    async function useMyLocation() {
+      if (!navigator.geolocation) {
+        showToast('Geolocation not supported');
+        return;
+      }
+
+      document.getElementById('location-text').textContent = 'Getting location...';
+
+      navigator.geolocation.getCurrentPosition(
+        async function(pos) {
+          selectedLat = pos.coords.latitude;
+          selectedLng = pos.coords.longitude;
+
+          scheduleMap.setView([selectedLat, selectedLng], 15);
+
+          if (locationMarker) {
+            scheduleMap.removeLayer(locationMarker);
+          }
+          locationMarker = addPickupMarker(scheduleMap, selectedLat, selectedLng, '📍');
+
+          document.getElementById('coords-display').textContent = 'Lat: ' + selectedLat.toFixed(5) + ' | Lng: ' + selectedLng.toFixed(5);
+          document.getElementById('location-text').textContent = 'Loading address...';
+
+          selectedAddress = await reverseGeocode(selectedLat, selectedLng);
+          document.getElementById('location-text').textContent = selectedAddress;
+        },
+        function(err) {
+          showToast('Location error: ' + err.message);
+          document.getElementById('location-text').textContent = 'Could not get location';
+        },
+        { enableHighAccuracy: true }
+      );
+    }
+
+    async function submitRequest() {
+      if (!selectedType) { showToast('Select a waste type'); return; }
+      if (!selectedLat || !selectedLng) { showToast('Select a location on the map'); return; }
+
+      var datetime = document.getElementById('schedule-datetime').value;
+      if (!datetime) { showToast('Select date & time'); return; }
+
+      // Make sure user is logged in
+      var user = currentUser || auth.currentUser;
+      if (!user) {
+        showToast('Not logged in! Please refresh and login again.');
+        return;
+      }
+
+      var btn = document.getElementById('submit-btn');
+      btn.textContent = 'SUBMITTING...';
+      btn.disabled = true;
+
+      console.log('Submitting pickup request...');
+      console.log('User:', user.id);
+      console.log('Type:', selectedType, 'Qty:', quantity);
+      console.log('Location:', selectedLat, selectedLng);
+      console.log('DateTime:', datetime);
+
+      try {
+        var docId = await createPickupRequest(
+          user.id,
+          selectedType,
+          quantity,
+          selectedLat,
+          selectedLng,
+          selectedAddress || ('Lat: ' + selectedLat.toFixed(4) + ', Lng: ' + selectedLng.toFixed(4)),
+          datetime
+        );
+
+        console.log('Success! Doc ID:', docId);
+
+        showToast('Pickup request submitted! ID: ' + docId.slice(0, 8));
+
+        setTimeout(function() {
+          window.location.href = 'home.html';
+        }, 1500);
+
+      } catch (e) {
+        console.error('Submit error:', e);
+        showToast('Error: ' + e.message);
+        btn.textContent = '✅ SUBMIT PICKUP REQUEST';
+        btn.disabled = false;
+      }
+    }
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

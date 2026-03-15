@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity AI Waste Scanner — Scan waste items with your camera and get instant classification.">
+  <title>CleanCity — AI Waste Scanner</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <!--
+  ════════════════════════════════════════
+  HOW TO TRAIN YOUR OWN TEACHABLE MACHINE MODEL:
+  ════════════════════════════════════════
+  1. Go to https://teachablemachine.withgoogle.com/train/image
+  2. Create 3 classes: Bio-waste, Solid Waste, E-waste
+     (or 6 classes: Cardboard, Glass, Metal, Paper, Plastic, Trash)
+  3. Upload images from the TrashNet / Garbage Classification dataset:
+     https://www.kaggle.com/datasets/fedesoriano/garbage-classification-dataset
+  4. Click "Train Model" (runs entirely in your browser, free)
+  5. Click "Export Model" → "Upload (shareable link)"
+  6. Copy the model URL and replace MODEL_URL in js/classifier.js
+     Example: https://teachablemachine.withgoogle.com/models/abc123XYZ/
+  ════════════════════════════════════════
+  -->
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="scanner.html" style="background:rgba(255,255,255,0.18);">SCAN</a>
+      <a href="schedule.html">SCHEDULE</a>
+      <a href="track.html">TRACK</a>
+      <a href="guide.html">GUIDE</a>
+      <a href="rewards.html">REWARDS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-24">AI WASTE SCANNER</h1>
+
+    <div class="grid-2">
+      <!-- Left: Camera -->
+      <div>
+        <div class="camera-box" id="camera-box">
+          <video id="camera-video" autoplay playsinline style="display:none;"></video>
+          <canvas id="camera-canvas" style="display:none;"></canvas>
+          <img id="uploaded-image" style="display:none;">
+          <div class="scan-frame" id="scan-frame" style="display:none;"></div>
+          <p id="camera-placeholder" style="color: #888; font-size: 14px; text-align:center; padding: 20px;">
+            Click "Start Camera" or upload an image to begin scanning
+          </p>
+        </div>
+
+        <div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">
+          <button class="btn-primary" id="start-camera-btn" onclick="startCamera()">📷 START CAMERA</button>
+          <label class="btn-yellow" style="cursor:pointer;">
+            📁 UPLOAD IMAGE
+            <input type="file" id="file-input" accept="image/*" style="display:none;" onchange="handleUpload(event)">
+          </label>
+        </div>
+
+        <button class="btn-primary w-full mt-16" id="scan-btn" onclick="scanImage()" style="display:none;">
+          🔍 SCAN NOW
+        </button>
+
+        <!-- Camera denied fallback -->
+        <div id="camera-denied" class="card mt-16" style="display:none; background:var(--yellow);">
+          <h3>📵 Camera Permission Denied</h3>
+          <p style="color:var(--black); margin: 8px 0;">Your browser blocked camera access. You can still use the upload option.</p>
+          <label class="btn-primary" style="cursor:pointer; display:inline-block;">
+            📁 USE UPLOAD INSTEAD
+            <input type="file" accept="image/*" style="display:none;" onchange="handleUpload(event)">
+          </label>
+        </div>
+      </div>
+
+      <!-- Right: Results -->
+      <div>
+        <div class="card" id="results-card">
+          <h2 class="mb-16">SCAN RESULTS</h2>
+
+          <!-- Idle state -->
+          <div id="result-idle">
+            <p>Point your camera at a waste item and click SCAN, or upload an image.</p>
+          </div>
+
+          <!-- Scanning state -->
+          <div id="result-scanning" style="display:none;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <div class="spinner"></div>
+              <h3>SCANNING<span class="scanning-text"></span></h3>
+            </div>
+          </div>
+
+          <!-- Result state -->
+          <div id="result-done" style="display:none;">
+            <div class="mb-16">
+              <p style="font-weight:700; font-size:13px; text-transform:uppercase; margin-bottom:6px;">Detected Material</p>
+              <span id="result-class" style="font-size:18px; font-weight:800;"></span>
+            </div>
+
+            <div class="mb-16">
+              <p style="font-weight:700; font-size:13px; text-transform:uppercase; margin-bottom:6px;">Waste Category</p>
+              <span id="result-badge" class="badge-solid" style="font-size:16px; padding:6px 16px;"></span>
+            </div>
+
+            <div class="mb-16">
+              <p style="font-weight:700; font-size:13px; text-transform:uppercase; margin-bottom:6px;">Confidence</p>
+              <div class="confidence-bar">
+                <div class="confidence-fill" id="confidence-fill" style="width:0%; background:var(--green);"></div>
+                <span class="confidence-label" id="confidence-label">0%</span>
+              </div>
+            </div>
+
+            <div class="mb-20">
+              <span class="points-badge" id="result-points">+0 Green Points</span>
+            </div>
+
+            <a href="schedule.html" class="btn-primary w-full" style="display:block; text-align:center;">
+              📅 SCHEDULE PICKUP
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <!-- Teachable Machine + TF.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.2.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+  <script src="../js/classifier.js"></script>
+
+  <script>
+    requireAuth(function(user) {});
+
+    var videoStream = null;
+    var model = null;
+    var currentImageElement = null;
+
+    // Try to load the model on page load
+    loadModel().then(function(m) {
+      model = m;
+    });
+
+    async function startCamera() {
+      try {
+        var video = document.getElementById('camera-video');
+        var stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: 400, height: 400 }
+        });
+        videoStream = stream;
+        video.srcObject = stream;
+        video.style.display = 'block';
+        document.getElementById('camera-placeholder').style.display = 'none';
+        document.getElementById('uploaded-image').style.display = 'none';
+        document.getElementById('scan-frame').style.display = 'block';
+        document.getElementById('scan-btn').style.display = 'block';
+        document.getElementById('camera-canvas').style.display = 'none';
+        currentImageElement = video;
+      } catch (e) {
+        console.error('Camera error:', e);
+        document.getElementById('camera-denied').style.display = 'block';
+        showToast('Camera access denied');
+      }
+    }
+
+    function handleUpload(event) {
+      var file = event.target.files[0];
+      if (!file) return;
+
+      var reader = new FileReader();
+      reader.onload = function(e) {
+        var img = document.getElementById('uploaded-image');
+        img.src = e.target.result;
+        img.style.display = 'block';
+        document.getElementById('camera-video').style.display = 'none';
+        document.getElementById('camera-placeholder').style.display = 'none';
+        document.getElementById('scan-frame').style.display = 'none';
+        document.getElementById('scan-btn').style.display = 'block';
+        document.getElementById('camera-canvas').style.display = 'none';
+
+        if (videoStream) {
+          videoStream.getTracks().forEach(function(t) { t.stop(); });
+          videoStream = null;
+        }
+        currentImageElement = img;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function scanImage() {
+      if (!currentImageElement) {
+        showToast('Start camera or upload an image first');
+        return;
+      }
+
+      // If video, capture frame to canvas
+      var imgEl = currentImageElement;
+      if (currentImageElement.tagName === 'VIDEO') {
+        var canvas = document.getElementById('camera-canvas');
+        canvas.width = currentImageElement.videoWidth || 400;
+        canvas.height = currentImageElement.videoHeight || 400;
+        canvas.getContext('2d').drawImage(currentImageElement, 0, 0, canvas.width, canvas.height);
+        canvas.style.display = 'block';
+        currentImageElement.style.display = 'none';
+        imgEl = canvas;
+      }
+
+      // Show scanning state
+      document.getElementById('result-idle').style.display = 'none';
+      document.getElementById('result-done').style.display = 'none';
+      document.getElementById('result-scanning').style.display = 'block';
+
+      // Simulate processing delay
+      await new Promise(function(r) { setTimeout(r, 1500); });
+
+      var result = await classifyImage(model, imgEl);
+
+      // Populate results
+      document.getElementById('result-class').textContent = result.rawClass;
+
+      var badge = document.getElementById('result-badge');
+      badge.textContent = result.category;
+      badge.className = result.badge;
+      badge.style.fontSize = '16px';
+      badge.style.padding = '6px 16px';
+
+      var fill = document.getElementById('confidence-fill');
+      fill.style.width = result.confidence + '%';
+      fill.style.background = result.confidence > 80 ? 'var(--green)' : (result.confidence > 50 ? 'var(--yellow)' : 'var(--red)');
+      document.getElementById('confidence-label').textContent = result.confidence + '%';
+
+      document.getElementById('result-points').textContent = '+' + result.points + ' Green Points';
+
+      document.getElementById('result-scanning').style.display = 'none';
+      document.getElementById('result-done').style.display = 'block';
+
+      showToast('Scan complete! ' + result.category + ' detected');
+    }
+
+    async function handleLogout() {
+      if (videoStream) {
+        videoStream.getTracks().forEach(function(t) { t.stop(); });
+      }
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

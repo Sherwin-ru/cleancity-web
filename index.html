@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity — AI-Powered Waste Management Platform. Login to manage waste pickups, scan waste with AI, and earn Green Points.">
+  <title>CleanCity — AI-Powered Waste Management</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <div class="login-container">
+    <h1 class="login-title">🌿 CLEANCITY</h1>
+    <p class="login-subtitle">AI-Powered Waste Management</p>
+
+    <div class="login-grid">
+      <!-- Citizen Login Card -->
+      <div class="login-card">
+        <h2>👤 Citizen Login</h2>
+        <input type="email" id="citizen-email" class="input" placeholder="Email address">
+        <input type="password" id="citizen-password" class="input" placeholder="Password">
+        <button class="btn-primary" id="citizen-login-btn" onclick="handleLogin('citizen')">LOGIN</button>
+        <div class="login-divider">— or —</div>
+        <button class="btn-yellow" id="citizen-google-btn" onclick="handleGoogleLogin('citizen')">🔵 Sign in with Google</button>
+      </div>
+
+      <!-- Authority Login Card -->
+      <div class="login-card">
+        <h2>🏛️ Authority Login</h2>
+        <input type="email" id="authority-email" class="input" placeholder="Email address">
+        <input type="password" id="authority-password" class="input" placeholder="Password">
+        <button class="btn-primary" id="authority-login-btn" onclick="handleLogin('authority')">LOGIN</button>
+        <div class="login-divider">— or —</div>
+        <button class="btn-yellow" id="authority-google-btn" onclick="handleGoogleLogin('authority')">🔵 Sign in with Google</button>
+      </div>
+    </div>
+
+    <p style="margin-top: 24px; font-size: 13px; color: var(--muted);">
+      New users are automatically registered on first login.
+    </p>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="js/auth.js"></script>
+  <script src="js/database.js"></script>
+
+  <script>
+    // Check if already logged in (or coming back from Google Auth redirect)
+    db.auth.onAuthStateChange(async function(event, session) {
+      if (session && session.user) {
+        var user = session.user;
+        var uid = user.id;
+        var userData = await getUserData(uid);
+        
+        if (userData && userData.role) {
+          // If already set up, redirect to dashboard immediately
+          if (userData.role === 'authority') {
+            window.location.href = 'authority/home.html';
+          } else {
+            window.location.href = 'citizen/home.html';
+          }
+        } else {
+          // If no userData, they just signed up via Google and have no profile yet
+          var pendingRole = localStorage.getItem('pendingAuthRole') || 'citizen';
+          await createOrUpdateUser(uid, {
+             name: user.user_metadata?.full_name || user.email.split('@')[0],
+             email: user.email,
+             role: pendingRole,
+             greenPoints: 0,
+             zone: 'Zone-A'
+          });
+          localStorage.removeItem('pendingAuthRole');
+          showToast('Welcome, ' + (user.user_metadata?.full_name || 'User') + '!');
+          window.location.href = pendingRole === 'authority' ? 'authority/home.html' : 'citizen/home.html';
+        }
+      }
+    });
+
+    async function handleLogin(role) {
+      var email = document.getElementById(role + '-email').value.trim();
+      var password = document.getElementById(role + '-password').value.trim();
+
+      if (!email || !password) {
+        showToast('Please enter email and password');
+        return;
+      }
+
+      var btn = document.getElementById(role + '-login-btn');
+      btn.textContent = 'LOGGING IN...';
+      btn.disabled = true;
+
+      var result = await loginWithEmail(email, password);
+
+      if (result.success) {
+        var uid = result.user.id;
+        var existingUser = await getUserData(uid);
+        
+        // Only initialize default data for completely new users
+        if (!existingUser) {
+          await createOrUpdateUser(uid, {
+            name: email.split('@')[0],
+            email: email,
+            role: role,
+            greenPoints: 0,
+            zone: 'Zone-A'
+          });
+        }
+        
+        showToast('Login successful!');
+        window.location.href = role === 'authority' ? 'authority/home.html' : 'citizen/home.html';
+      } else {
+        showToast('Error: ' + result.error);
+        btn.textContent = 'LOGIN';
+        btn.disabled = false;
+      }
+    }
+
+    async function handleGoogleLogin(role) {
+      // Store intended role before Supabase redirects to Google
+      localStorage.setItem('pendingAuthRole', role);
+      
+      var btn = document.getElementById(role + '-google-btn');
+      btn.textContent = 'SIGNING IN...';
+      btn.disabled = true;
+
+      var result = await loginWithGoogle();
+
+      // If success, Supabase will redirect the page to Google so the code below won't run.
+      // If error, it returns immediately:
+      if (!result.success) {
+        showToast('Error: ' + result.error);
+        btn.textContent = '🔵 Sign in with Google';
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

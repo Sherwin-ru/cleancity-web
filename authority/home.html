@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Authority Dashboard — Manage waste pickups, monitor collectors, and view analytics.">
+  <title>CleanCity — Authority Dashboard</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="heatmap.html">HEATMAP</a>
+      <a href="requests.html">REQUESTS</a>
+      <a href="routes.html">ROUTES</a>
+      <a href="analytics.html">ANALYTICS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-8">AUTHORITY DASHBOARD</h1>
+    <p class="mb-32">Welcome back. Here's your city waste management overview.</p>
+
+    <!-- Stats Row -->
+    <div class="grid-4 mb-32">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-pending" style="color:var(--yellow);">0</div>
+        <div class="stat-label">Pending</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-assigned" style="color:var(--blue);">0</div>
+        <div class="stat-label">Assigned</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-completed" style="color:var(--green);">0</div>
+        <div class="stat-label">Completed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-collectors" style="color:var(--black);">0</div>
+        <div class="stat-label">Active Collectors</div>
+      </div>
+    </div>
+
+    <!-- Quick Access -->
+    <h2 class="mb-16">QUICK ACCESS</h2>
+    <div class="grid-4">
+      <a href="heatmap.html" class="action-card green">
+        <span class="icon">🗺️</span>
+        <span class="label">Waste Heatmap</span>
+      </a>
+      <a href="requests.html" class="action-card blue">
+        <span class="icon">📋</span>
+        <span class="label">Manage Requests</span>
+      </a>
+      <a href="routes.html" class="action-card yellow">
+        <span class="icon">🚛</span>
+        <span class="label">Route Optimizer</span>
+      </a>
+      <a href="analytics.html" class="action-card">
+        <span class="icon">📊</span>
+        <span class="label">Analytics</span>
+      </a>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <script>
+    requireAuth(async function(user) {
+      // Load stats
+      try {
+        var counts = await getRequestCounts();
+        document.getElementById('stat-pending').textContent = counts.pending;
+        document.getElementById('stat-assigned').textContent = counts.assigned;
+        document.getElementById('stat-completed').textContent = counts.completed;
+
+        var collectors = await getActiveCollectors();
+        document.getElementById('stat-collectors').textContent = collectors.length;
+      } catch (e) {
+        console.error('Stats load error:', e);
+      }
+    });
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

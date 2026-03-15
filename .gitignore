@@ -1,0 +1,26 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.py
+*.sql
+*.webp
+*.png
+.gemini/
+.agents/
+.agent/
+_agents/
+_agent/
+brain/
+/tmp/
+node_modules/
+dist/
+build/
+.env
+.antigravityignore
+cleanup_supabase.py
+migrate_hybrid.py
+migrate_pure_supabase.py
+migrate_scripts.py
+cleanup_supabase.py

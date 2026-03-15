@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Green Points — View your earned points, transaction history, and redeem rewards.">
+  <title>CleanCity — Green Points & Rewards</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="scanner.html">SCAN</a>
+      <a href="schedule.html">SCHEDULE</a>
+      <a href="track.html">TRACK</a>
+      <a href="guide.html">GUIDE</a>
+      <a href="rewards.html" style="background:rgba(255,255,255,0.18);">REWARDS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-24">GREEN POINTS</h1>
+
+    <!-- Hero Points Card -->
+    <div class="hero-banner mb-32 text-center">
+      <p style="font-weight:700; font-size:14px; text-transform:uppercase; color:var(--black); margin-bottom:8px;">Your Total Green Points</p>
+      <div style="font-size:72px; font-weight:800; line-height:1;" id="total-points">0</div>
+      <p style="margin-top:8px; color:var(--black);">Keep recycling to earn more! ♻️</p>
+    </div>
+
+    <!-- Points History -->
+    <h2 class="mb-16">POINTS HISTORY</h2>
+    <div id="points-history" class="mb-32">
+      <p style="text-align:center; padding:24px;">Loading history...</p>
+    </div>
+
+    <!-- Rewards -->
+    <h2 class="mb-16">AVAILABLE REWARDS</h2>
+    <div class="grid-3">
+      <div class="reward-card">
+        <span style="font-size:36px;">🛍️</span>
+        <h3>5% OFF AT PARTNER STORE</h3>
+        <p>Get a discount voucher redeemable at participating eco-friendly stores.</p>
+        <p style="font-weight:800; color:var(--green);">Cost: 100 pts</p>
+        <button class="btn-outline" onclick="showToast('Coming soon! Stay tuned for reward redemption.')">REDEEM</button>
+      </div>
+      <div class="reward-card">
+        <span style="font-size:36px;">🌱</span>
+        <h3>FREE PLANT SAPLING</h3>
+        <p>Receive a free plant sapling delivered to your address.</p>
+        <p style="font-weight:800; color:var(--green);">Cost: 200 pts</p>
+        <button class="btn-outline" onclick="showToast('Coming soon! Stay tuned for reward redemption.')">REDEEM</button>
+      </div>
+      <div class="reward-card">
+        <span style="font-size:36px;">🏆</span>
+        <h3>MUNICIPALITY CERTIFICATE</h3>
+        <p>Get an official Green Citizen certificate from your municipality.</p>
+        <p style="font-weight:800; color:var(--green);">Cost: 500 pts</p>
+        <button class="btn-outline" onclick="showToast('Coming soon! Stay tuned for reward redemption.')">REDEEM</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <script>
+    requireAuth(async function(user) {
+      // Load points
+      var userData = await getUserData(user.id);
+      if (userData) {
+        document.getElementById('total-points').textContent = userData.greenPoints || 0;
+      }
+
+      // Load points history
+      try {
+        var history = await getPointsHistory(user.id);
+        var container = document.getElementById('points-history');
+
+        if (history.length === 0) {
+          container.innerHTML = '<div class="card text-center"><p>No points earned yet. Scan and recycle waste to start earning!</p></div>';
+          return;
+        }
+
+        var html = '';
+        history.forEach(function(entry) {
+          var date = entry.createdAt ? new Date(entry.createdAt.seconds * 1000).toLocaleDateString() : 'N/A';
+          var isPositive = entry.points > 0;
+
+          html += '<div class="request-row">' +
+            '<span style="font-size:13px; color:var(--muted); min-width:90px;">' + date + '</span>' +
+            '<span style="flex:1; font-weight:500;">' + entry.action + '</span>' +
+            '<span style="font-weight:800; font-size:16px; color:' + (isPositive ? 'var(--green)' : 'var(--red)') + ';">' +
+            (isPositive ? '+' : '') + entry.points + ' pts</span>' +
+            '</div>';
+        });
+
+        container.innerHTML = html;
+      } catch (e) {
+        document.getElementById('points-history').innerHTML = '<div class="card text-center"><p>Could not load history.</p></div>';
+      }
+    });
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

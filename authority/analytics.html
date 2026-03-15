@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Analytics — Charts and reports for waste management insights.">
+  <title>CleanCity — Analytics</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="heatmap.html">HEATMAP</a>
+      <a href="requests.html">REQUESTS</a>
+      <a href="routes.html">ROUTES</a>
+      <a href="analytics.html" style="background:rgba(255,255,255,0.18);">ANALYTICS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-24">ANALYTICS</h1>
+
+    <!-- Date Range -->
+    <div style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap;" class="mb-32">
+      <div>
+        <label style="font-weight:700; font-size:13px; text-transform:uppercase; display:block; margin-bottom:6px;">From</label>
+        <input type="date" class="input" id="date-from" style="width:180px;">
+      </div>
+      <div>
+        <label style="font-weight:700; font-size:13px; text-transform:uppercase; display:block; margin-bottom:6px;">To</label>
+        <input type="date" class="input" id="date-to" style="width:180px;">
+      </div>
+      <button class="btn-primary" onclick="loadAnalytics()">📊 LOAD DATA</button>
+    </div>
+
+    <!-- Charts -->
+    <div class="grid-2 mb-32">
+      <!-- Bar Chart: Waste by Type -->
+      <div class="chart-card">
+        <h2 class="mb-16">WASTE BY TYPE (LAST 7 DAYS)</h2>
+        <canvas id="chart-by-type"></canvas>
+      </div>
+
+      <!-- Line Chart: Requests per Day -->
+      <div class="chart-card">
+        <h2 class="mb-16">REQUESTS PER DAY (LAST 30 DAYS)</h2>
+        <canvas id="chart-per-day"></canvas>
+      </div>
+    </div>
+
+    <!-- Doughnut Chart -->
+    <div style="max-width:500px; margin:0 auto;">
+      <div class="chart-card">
+        <h2 class="mb-16">COMPLETION RATE</h2>
+        <canvas id="chart-completion"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <script>
+    requireAuth(function(user) {});
+
+    var chartByType = null;
+    var chartPerDay = null;
+    var chartCompletion = null;
+
+    // Set default dates
+    var today = new Date();
+    var thirtyAgo = new Date();
+    thirtyAgo.setDate(today.getDate() - 30);
+    document.getElementById('date-to').value = today.toISOString().split('T')[0];
+    document.getElementById('date-from').value = thirtyAgo.toISOString().split('T')[0];
+
+    // Neo-brutalism chart defaults
+    Chart.defaults.font.family = "'Space Grotesk', sans-serif";
+    Chart.defaults.font.weight = '700';
+    Chart.defaults.plugins.legend.labels.usePointStyle = true;
+
+    loadAnalytics();
+
+    async function loadAnalytics() {
+      showToast('Loading analytics...');
+
+      var requests = [];
+      try {
+        requests = await getAnalyticsData('all', 30);
+      } catch (e) {
+        console.warn('No Firestore data, using demo data');
+      }
+
+      // If no real data, use demo data
+      var useDemoData = requests.length === 0;
+
+      renderBarChart(requests, useDemoData);
+      renderLineChart(requests, useDemoData);
+      renderDoughnutChart(requests, useDemoData);
+    }
+
+    function renderBarChart(requests, demo) {
+      var ctx = document.getElementById('chart-by-type').getContext('2d');
+
+      if (chartByType) chartByType.destroy();
+
+      var labels = [];
+      var solidData = [];
+      var bioData = [];
+      var ewasteData = [];
+
+      if (demo) {
+        // Demo data for last 7 days
+        for (var i = 6; i >= 0; i--) {
+          var d = new Date();
+          d.setDate(d.getDate() - i);
+          labels.push(d.toLocaleDateString('en', { weekday: 'short' }));
+          solidData.push(Math.floor(Math.random() * 15) + 3);
+          bioData.push(Math.floor(Math.random() * 12) + 2);
+          ewasteData.push(Math.floor(Math.random() * 8) + 1);
+        }
+      } else {
+        // Group by day for last 7 days
+        for (var i = 6; i >= 0; i--) {
+          var d = new Date();
+          d.setDate(d.getDate() - i);
+          var dateStr = d.toISOString().split('T')[0];
+          labels.push(d.toLocaleDateString('en', { weekday: 'short' }));
+
+          var dayReqs = requests.filter(function(r) {
+            if (!r.createdAt) return false;
+            var rd = new Date(r.createdAt.seconds * 1000).toISOString().split('T')[0];
+            return rd === dateStr;
+          });
+
+          solidData.push(dayReqs.filter(function(r) { return r.wasteType === 'Solid'; }).length);
+          bioData.push(dayReqs.filter(function(r) { return r.wasteType === 'Bio-waste'; }).length);
+          ewasteData.push(dayReqs.filter(function(r) { return r.wasteType === 'E-waste'; }).length);
+        }
+      }
+
+      chartByType = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            { label: 'Solid Waste', data: solidData, backgroundColor: '#1A6BFF', borderColor: '#0A0A0A', borderWidth: 2 },
+            { label: 'Bio-waste', data: bioData, backgroundColor: '#1D9E75', borderColor: '#0A0A0A', borderWidth: 2 },
+            { label: 'E-waste', data: ewasteData, backgroundColor: '#E24B4A', borderColor: '#0A0A0A', borderWidth: 2 }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'top' } },
+          scales: {
+            x: { grid: { display: false }, border: { color: '#0A0A0A', width: 2 } },
+            y: { beginAtZero: true, grid: { color: '#E5E5E0' }, border: { color: '#0A0A0A', width: 2 } }
+          }
+        }
+      });
+    }
+
+    function renderLineChart(requests, demo) {
+      var ctx = document.getElementById('chart-per-day').getContext('2d');
+
+      if (chartPerDay) chartPerDay.destroy();
+
+      var labels = [];
+      var data = [];
+
+      if (demo) {
+        for (var i = 29; i >= 0; i--) {
+          var d = new Date();
+          d.setDate(d.getDate() - i);
+          labels.push(d.getDate() + '/' + (d.getMonth() + 1));
+          data.push(Math.floor(Math.random() * 25) + 5);
+        }
+      } else {
+        for (var i = 29; i >= 0; i--) {
+          var d = new Date();
+          d.setDate(d.getDate() - i);
+          var dateStr = d.toISOString().split('T')[0];
+          labels.push(d.getDate() + '/' + (d.getMonth() + 1));
+
+          var count = requests.filter(function(r) {
+            if (!r.createdAt) return false;
+            return new Date(r.createdAt.seconds * 1000).toISOString().split('T')[0] === dateStr;
+          }).length;
+          data.push(count);
+        }
+      }
+
+      chartPerDay = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Total Requests',
+            data: data,
+            borderColor: '#1D9E75',
+            backgroundColor: 'rgba(29,158,117,0.1)',
+            borderWidth: 3,
+            fill: true,
+            tension: 0.3,
+            pointBackgroundColor: '#1D9E75',
+            pointBorderColor: '#0A0A0A',
+            pointBorderWidth: 2,
+            pointRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'top' } },
+          scales: {
+            x: { grid: { display: false }, border: { color: '#0A0A0A', width: 2 }, ticks: { maxTicksLimit: 10 } },
+            y: { beginAtZero: true, grid: { color: '#E5E5E0' }, border: { color: '#0A0A0A', width: 2 } }
+          }
+        }
+      });
+    }
+
+    function renderDoughnutChart(requests, demo) {
+      var ctx = document.getElementById('chart-completion').getContext('2d');
+
+      if (chartCompletion) chartCompletion.destroy();
+
+      var completed, pending, assigned;
+
+      if (demo) {
+        completed = 47;
+        pending = 18;
+        assigned = 12;
+      } else {
+        completed = requests.filter(function(r) { return r.status === 'completed'; }).length;
+        pending = requests.filter(function(r) { return r.status === 'pending'; }).length;
+        assigned = requests.filter(function(r) { return r.status === 'assigned'; }).length;
+      }
+
+      chartCompletion = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Completed', 'Pending', 'Assigned'],
+          datasets: [{
+            data: [completed, pending, assigned],
+            backgroundColor: ['#1D9E75', '#E24B4A', '#FFE566'],
+            borderColor: '#0A0A0A',
+            borderWidth: 2.5
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { position: 'bottom' }
+          },
+          cutout: '55%'
+        }
+      });
+    }
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

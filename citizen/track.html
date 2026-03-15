@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity — Track your waste collector in real-time on a live map.">
+  <title>CleanCity — Track Pickup</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="scanner.html">SCAN</a>
+      <a href="schedule.html">SCHEDULE</a>
+      <a href="track.html" style="background:rgba(255,255,255,0.18);">TRACK</a>
+      <a href="guide.html">GUIDE</a>
+      <a href="rewards.html">REWARDS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-24">TRACK YOUR PICKUP</h1>
+
+    <!-- No active pickup -->
+    <div id="no-pickup" style="display:none;">
+      <div class="card text-center" style="padding:48px;">
+        <span style="font-size:48px;">📭</span>
+        <h2 style="margin-top:16px;">NO ACTIVE PICKUP</h2>
+        <p style="margin:12px 0 20px;">You don't have any assigned pickups being collected right now.</p>
+        <a href="schedule.html" class="btn-primary">📅 SCHEDULE A PICKUP</a>
+      </div>
+    </div>
+
+    <!-- Active pickup -->
+    <div id="active-pickup" style="display:none;">
+      <!-- Status Banner -->
+      <div class="hero-banner mb-20" id="status-banner">
+        <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+          <div>
+            <span class="status-assigned" style="font-size:14px;">COLLECTOR EN ROUTE</span>
+            <h3 style="margin-top:8px;" id="collector-name-banner">Collector</h3>
+          </div>
+          <div>
+            <span id="pickup-waste-badge" class="badge-solid">SOLID</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Map -->
+      <div id="track-map" class="map-container mb-20" style="height:500px;"></div>
+
+      <!-- Collector Info Card -->
+      <div class="card" id="collector-info">
+        <h2 class="mb-12">COLLECTOR DETAILS</h2>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px;">
+          <div>
+            <p style="font-weight:700; font-size:13px; text-transform:uppercase; margin-bottom:4px;">Name</p>
+            <span style="font-weight:800; font-size:16px;" id="collector-name">—</span>
+          </div>
+          <div>
+            <p style="font-weight:700; font-size:13px; text-transform:uppercase; margin-bottom:4px;">Vehicle</p>
+            <span style="font-weight:800; font-size:16px;" id="collector-vehicle">—</span>
+          </div>
+          <div>
+            <p style="font-weight:700; font-size:13px; text-transform:uppercase; margin-bottom:4px;">Phone</p>
+            <span style="font-weight:800; font-size:16px;" id="collector-phone">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="../js/maps.js"></script>
+
+  <script>
+    var trackMap = null;
+    var collectorMarker = null;
+    var routeLayer = null;
+    var trackingInterval = null;
+
+    requireAuth(async function(user) {
+      try {
+        // Find active assigned pickup for this user
+        var userReqs = await getUserRequests(user.id);
+        var assigned = userReqs.filter(function(r) { return r.status === 'assigned'; });
+
+        if (assigned.length === 0) {
+          document.getElementById('no-pickup').style.display = 'block';
+          return;
+        }
+
+        document.getElementById('active-pickup').style.display = 'block';
+        var pickup = assigned[0];
+        var pickupId = pickup.id;
+
+        // Set waste badge
+        var badgeEl = document.getElementById('pickup-waste-badge');
+        if (pickup.wasteType === 'Bio-waste') {
+          badgeEl.className = 'badge-bio';
+          badgeEl.textContent = 'BIO-WASTE';
+        } else if (pickup.wasteType === 'E-waste') {
+          badgeEl.className = 'badge-ewaste';
+          badgeEl.textContent = 'E-WASTE';
+        } else {
+          badgeEl.className = 'badge-solid';
+          badgeEl.textContent = 'SOLID';
+        }
+
+        // Init map centered on pickup location
+        trackMap = initMap('track-map', pickup.lat, pickup.lng, 14);
+
+        // Add pickup marker (green)
+        addPickupMarker(trackMap, pickup.lat, pickup.lng, '📍');
+
+        // Fetch collector info
+        if (pickup.collectorId) {
+          var collector = await getCollector(pickup.collectorId);
+          if (collector) {
+            document.getElementById('collector-name-banner').textContent = collector.name;
+            document.getElementById('collector-name').textContent = collector.name;
+            document.getElementById('collector-vehicle').textContent = collector.vehicleNumber || '—';
+            document.getElementById('collector-phone').textContent = collector.phone || '—';
+
+            // Place initial collector marker
+            if (collector.currentLat && collector.currentLng) {
+              collectorMarker = addCollectorMarker(trackMap, collector.currentLat, collector.currentLng);
+
+              // Draw initial route
+              var routeCoords = await getRoute(collector.currentLat, collector.currentLng, pickup.lat, pickup.lng);
+              if (routeCoords.length > 0) {
+                routeLayer = drawRoute(trackMap, routeCoords, '#1D9E75');
+                trackMap.fitBounds(L.latLngBounds(routeCoords));
+              }
+            }
+
+            // Poll collector location every 5 seconds
+            trackingInterval = setInterval(async function() {
+              try {
+                var updated = await getCollector(pickup.collectorId);
+                if (updated && updated.currentLat && updated.currentLng) {
+                  if (collectorMarker) {
+                    collectorMarker.setLatLng([updated.currentLat, updated.currentLng]);
+                  } else {
+                    collectorMarker = addCollectorMarker(trackMap, updated.currentLat, updated.currentLng);
+                  }
+                }
+              } catch (err) {
+                console.warn('Tracking poll error:', err);
+              }
+            }, 5000);
+          }
+        }
+
+      } catch (e) {
+        console.error('Track page error:', e);
+        document.getElementById('no-pickup').style.display = 'block';
+      }
+    });
+
+    async function handleLogout() {
+      if (trackingInterval) clearInterval(trackingInterval);
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

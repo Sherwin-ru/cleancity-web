@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Route Optimizer — Optimize waste collection routes using OSRM for efficient pickups.">
+  <title>CleanCity — Route Optimizer</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="heatmap.html">HEATMAP</a>
+      <a href="requests.html">REQUESTS</a>
+      <a href="routes.html" style="background:rgba(255,255,255,0.18);">ROUTES</a>
+      <a href="analytics.html">ANALYTICS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-24">ROUTE OPTIMIZER</h1>
+
+    <!-- Controls -->
+    <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;" class="mb-20">
+      <div>
+        <label style="font-weight:700; font-size:13px; text-transform:uppercase; display:block; margin-bottom:6px;">Zone</label>
+        <select class="input" id="zone-select" style="width:200px;">
+          <option value="Zone-A">Zone A</option>
+          <option value="Zone-B">Zone B</option>
+          <option value="Zone-C">Zone C</option>
+          <option value="all">All Zones</option>
+        </select>
+      </div>
+      <button class="btn-primary" id="optimize-btn" onclick="optimizeRoute()" style="margin-top:22px;">
+        🚛 OPTIMIZE ROUTE
+      </button>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="grid-3 mb-20">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-stops">0</div>
+        <div class="stat-label">Total Stops</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-distance">0 km</div>
+        <div class="stat-label">Est. Distance</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-time">0 min</div>
+        <div class="stat-label">Est. Time</div>
+      </div>
+    </div>
+
+    <!-- Map -->
+    <div id="route-map" class="map-container mb-24" style="height:500px;"></div>
+
+    <!-- Waypoint Cards -->
+    <h2 class="mb-16" id="waypoints-title" style="display:none;">OPTIMIZED STOP ORDER</h2>
+    <div id="waypoints-list"></div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="../js/maps.js"></script>
+
+  <script>
+    requireAuth(function(user) {});
+
+    var routeMap = initMap('route-map', 20.5937, 78.9629, 5);
+    var routeLayer = null;
+    var waypointMarkers = [];
+
+    async function optimizeRoute() {
+      var zone = document.getElementById('zone-select').value;
+      var btn = document.getElementById('optimize-btn');
+      btn.textContent = 'OPTIMIZING...';
+      btn.disabled = true;
+
+      // Clear previous
+      if (routeLayer) routeMap.removeLayer(routeLayer);
+      waypointMarkers.forEach(function(m) { routeMap.removeLayer(m); });
+      waypointMarkers = [];
+
+      try {
+        // Fetch pending requests
+        var requests = await getAllPendingRequests();
+
+        // Filter by zone if not 'all'
+        if (zone !== 'all') {
+          // Since requests don't have zone, we use all pending requests
+          // In production you'd filter by zone field
+        }
+
+        // Filter to only requests with valid coordinates
+        requests = requests.filter(function(r) { return r.lat && r.lng; });
+
+        if (requests.length < 2) {
+          showToast('Need at least 2 pickup locations to optimize');
+          btn.textContent = '🚛 OPTIMIZE ROUTE';
+          btn.disabled = false;
+
+          // Still show the single point if exists
+          if (requests.length === 1) {
+            var m = addNumberedMarker(routeMap, requests[0].lat, requests[0].lng, 1);
+            waypointMarkers.push(m);
+            routeMap.setView([requests[0].lat, requests[0].lng], 14);
+            document.getElementById('stat-stops').textContent = '1';
+          }
+          return;
+        }
+
+        // Build waypoints array
+        var waypoints = requests.map(function(r) {
+          return { lat: r.lat, lng: r.lng, request: r };
+        });
+
+        // Call OSRM Trip API
+        var result = await getOptimizedTrip(waypoints);
+
+        // Update stats
+        document.getElementById('stat-stops').textContent = requests.length;
+        document.getElementById('stat-distance').textContent = ((result.distance || 0) / 1000).toFixed(1) + ' km';
+        document.getElementById('stat-time').textContent = Math.round((result.duration || 0) / 60) + ' min';
+
+        // Draw route
+        if (result.routeCoordinates && result.routeCoordinates.length > 0) {
+          routeLayer = drawRoute(routeMap, result.routeCoordinates, '#1D9E75');
+          routeMap.fitBounds(L.latLngBounds(result.routeCoordinates).pad(0.1));
+        }
+
+        // Add numbered markers
+        var orderedWaypoints = result.orderedWaypoints || waypoints;
+        orderedWaypoints.forEach(function(wp, i) {
+          var marker = addNumberedMarker(routeMap, wp.lat, wp.lng, i + 1);
+          waypointMarkers.push(marker);
+        });
+
+        // Render waypoint cards
+        document.getElementById('waypoints-title').style.display = 'block';
+        var listHtml = '';
+        orderedWaypoints.forEach(function(wp, i) {
+          var originalReq = requests.find(function(r) {
+            return Math.abs(r.lat - wp.lat) < 0.001 && Math.abs(r.lng - wp.lng) < 0.001;
+          });
+
+          var location = originalReq ? (originalReq.locationName || 'Unknown') : 'Stop';
+          var wasteType = originalReq ? originalReq.wasteType : 'N/A';
+          var badgeClass = wasteType === 'Solid' ? 'badge-solid' : (wasteType === 'Bio-waste' ? 'badge-bio' : 'badge-ewaste');
+
+          listHtml += '<div class="request-row">' +
+            '<span style="background:var(--blue); color:white; border:2px solid var(--black); width:28px; height:28px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:13px;">' + (i + 1) + '</span>' +
+            '<span style="flex:1; font-weight:500;">' + location + '</span>' +
+            '<span class="' + badgeClass + '">' + wasteType + '</span>' +
+            '</div>';
+        });
+        document.getElementById('waypoints-list').innerHTML = listHtml;
+
+        showToast('Route optimized! ' + requests.length + ' stops');
+
+      } catch (e) {
+        showToast('Error: ' + e.message);
+        console.error('Route optimization error:', e);
+      }
+
+      btn.textContent = '🚛 OPTIMIZE ROUTE';
+      btn.disabled = false;
+    }
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

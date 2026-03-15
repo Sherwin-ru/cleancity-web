@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Live Waste Heatmap — Visualize waste density across the city in real-time.">
+  <title>CleanCity — Waste Heatmap</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="heatmap.html" style="background:rgba(255,255,255,0.18);">HEATMAP</a>
+      <a href="requests.html">REQUESTS</a>
+      <a href="routes.html">ROUTES</a>
+      <a href="analytics.html">ANALYTICS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-24">LIVE WASTE HEATMAP</h1>
+
+    <!-- Filters -->
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;" class="mb-20">
+      <div class="toggle-group" style="margin-bottom:0;">
+        <button class="toggle-btn active" id="hm-filter-All" onclick="setHeatFilter('All')">ALL</button>
+        <button class="toggle-btn" id="hm-filter-Solid" onclick="setHeatFilter('Solid')">🔵 SOLID</button>
+        <button class="toggle-btn" id="hm-filter-Bio-waste" onclick="setHeatFilter('Bio-waste')">🟢 BIO</button>
+        <button class="toggle-btn" id="hm-filter-E-waste" onclick="setHeatFilter('E-waste')">🔴 E-WASTE</button>
+      </div>
+      <button class="btn-primary" onclick="refreshHeatmap()">🔄 REFRESH MAP</button>
+    </div>
+
+    <!-- Map -->
+    <div style="position:relative;">
+      <div id="heatmap" class="map-container" style="height:600px;"></div>
+
+      <!-- Legend -->
+      <div class="map-legend" style="position:absolute; bottom:20px; left:20px; z-index:800;">
+        <div style="font-weight:800; margin-bottom:8px; text-transform:uppercase; font-size:13px;">Density Legend</div>
+        <div class="legend-item">
+          <span class="legend-dot" style="background:#1D9E75;"></span>
+          <span>Low (1-2 requests)</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-dot" style="background:#FFE566;"></span>
+          <span>Medium (3-5 requests)</span>
+        </div>
+        <div class="legend-item">
+          <span class="legend-dot" style="background:#E24B4A;"></span>
+          <span>High (6+ requests)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="../js/maps.js"></script>
+
+  <script>
+    requireAuth(function(user) {});
+
+    var heatMap = null;
+    var heatMarkers = [];
+    var currentFilter = 'All';
+    var allPendingRequests = [];
+
+    heatMap = initMap('heatmap', 20.5937, 78.9629, 5);
+
+    refreshHeatmap();
+
+    function setHeatFilter(filter) {
+      currentFilter = filter;
+      ['All', 'Solid', 'Bio-waste', 'E-waste'].forEach(function(f) {
+        document.getElementById('hm-filter-' + f).className = 'toggle-btn' + (f === filter ? ' active' : '');
+      });
+      renderHeatmarkers();
+    }
+
+    async function refreshHeatmap() {
+      showToast('Refreshing heatmap...');
+
+      try {
+        allPendingRequests = await getAllPendingRequests();
+        renderHeatmarkers();
+        showToast('Heatmap updated — ' + allPendingRequests.length + ' pending requests');
+      } catch (e) {
+        showToast('Error loading requests');
+        console.error(e);
+      }
+    }
+
+    function renderHeatmarkers() {
+      // Clear existing
+      heatMarkers.forEach(function(m) { heatMap.removeLayer(m); });
+      heatMarkers = [];
+
+      var filtered = allPendingRequests;
+      if (currentFilter !== 'All') {
+        filtered = allPendingRequests.filter(function(r) { return r.wasteType === currentFilter; });
+      }
+
+      if (filtered.length === 0) return;
+
+      // Calculate density: count nearby requests within 300m
+      filtered.forEach(function(req, i) {
+        if (!req.lat || !req.lng) return;
+
+        var nearbyCount = 0;
+        filtered.forEach(function(other, j) {
+          if (i === j || !other.lat || !other.lng) return;
+          var dist = getDistanceMeters(req.lat, req.lng, other.lat, other.lng);
+          if (dist < 300) nearbyCount++;
+        });
+
+        var totalNearby = nearbyCount + 1;
+        var radius = 20 + (nearbyCount * 5);
+        var color;
+        if (totalNearby >= 6) {
+          color = '#E24B4A'; // red
+        } else if (totalNearby >= 3) {
+          color = '#FFE566'; // yellow
+        } else {
+          color = '#1D9E75'; // green
+        }
+
+        var marker = addHeatCircle(heatMap, req.lat, req.lng, radius, color);
+
+        var popup = '<strong>' + req.wasteType + '</strong><br>' +
+          (req.locationName || 'Unknown') + '<br>' +
+          '<span style="font-size:12px;">Qty: ' + (req.quantity || 1) + ' kg</span>';
+        marker.bindPopup(popup);
+
+        heatMarkers.push(marker);
+      });
+
+      // Fit bounds
+      if (heatMarkers.length > 0) {
+        var group = L.featureGroup(heatMarkers);
+        heatMap.fitBounds(group.getBounds().pad(0.2));
+      }
+    }
+
+    function getDistanceMeters(lat1, lng1, lat2, lng2) {
+      var R = 6371000;
+      var dLat = (lat2 - lat1) * Math.PI / 180;
+      var dLng = (lng2 - lng1) * Math.PI / 180;
+      var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

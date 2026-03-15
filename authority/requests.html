@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Request Management — View, filter, and assign collectors to waste pickup requests.">
+  <title>CleanCity — Pickup Requests</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="heatmap.html">HEATMAP</a>
+      <a href="requests.html" style="background:rgba(255,255,255,0.18);">REQUESTS</a>
+      <a href="routes.html">ROUTES</a>
+      <a href="analytics.html">ANALYTICS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <h1 class="mb-24">PICKUP REQUESTS</h1>
+
+    <!-- Filters -->
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;" class="mb-20">
+      <div class="toggle-group" style="margin-bottom:0;">
+        <button class="toggle-btn active" id="req-filter-all" onclick="setReqFilter('all')">ALL</button>
+        <button class="toggle-btn" id="req-filter-pending" onclick="setReqFilter('pending')">PENDING</button>
+        <button class="toggle-btn" id="req-filter-assigned" onclick="setReqFilter('assigned')">ASSIGNED</button>
+        <button class="toggle-btn" id="req-filter-completed" onclick="setReqFilter('completed')">COMPLETED</button>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <input type="text" class="input mb-20" id="req-search" placeholder="🔍 Search by location or waste type..." oninput="filterTable()">
+
+    <!-- Table -->
+    <div class="table-wrapper">
+      <table class="neo-table" id="requests-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Waste Type</th>
+            <th>Location</th>
+            <th>Scheduled</th>
+            <th>Status</th>
+            <th>Collector</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="requests-tbody">
+          <tr><td colspan="7" style="text-align:center; padding:24px;">Loading requests...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <script>
+    var allRequests = [];
+    var allCollectors = [];
+    var currentStatusFilter = 'all';
+
+    requireAuth(async function(user) {
+      // Load collectors for assignment dropdown
+      try {
+        allCollectors = await getCollectors();
+      } catch (e) {
+        console.warn('Could not load collectors:', e);
+      }
+
+      // Listen to requests in real-time
+      listenToRequests(function(requests) {
+        allRequests = requests;
+        filterTable();
+      });
+    });
+
+    function setReqFilter(filter) {
+      currentStatusFilter = filter;
+      ['all', 'pending', 'assigned', 'completed'].forEach(function(f) {
+        document.getElementById('req-filter-' + f).className = 'toggle-btn' + (f === filter ? ' active' : '');
+      });
+      filterTable();
+    }
+
+    function filterTable() {
+      var search = document.getElementById('req-search').value.toLowerCase();
+
+      var filtered = allRequests.filter(function(req) {
+        var matchStatus = currentStatusFilter === 'all' || req.status === currentStatusFilter;
+        var matchSearch = !search ||
+          (req.locationName || '').toLowerCase().includes(search) ||
+          (req.wasteType || '').toLowerCase().includes(search);
+        return matchStatus && matchSearch;
+      });
+
+      renderTable(filtered);
+    }
+
+    function renderTable(requests) {
+      var tbody = document.getElementById('requests-tbody');
+
+      if (requests.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px;">No requests found.</td></tr>';
+        return;
+      }
+
+      var html = '';
+      requests.forEach(function(req) {
+        var badgeClass = req.wasteType === 'Solid' ? 'badge-solid' : (req.wasteType === 'Bio-waste' ? 'badge-bio' : 'badge-ewaste');
+        var statusClass = 'status-' + req.status;
+        var scheduled = req.scheduledTime ? new Date(req.scheduledTime.seconds * 1000).toLocaleString() : 'N/A';
+        var shortId = req.id.slice(0, 8);
+
+        // Collector cell
+        var collectorCell = '—';
+        if (req.collectorId) {
+          var c = allCollectors.find(function(col) { return col.id === req.collectorId; });
+          collectorCell = c ? c.name : req.collectorId.slice(0, 8);
+        }
+
+        // Action cell
+        var actionCell = '';
+        if (req.status === 'pending') {
+          actionCell = '<select class="input" style="padding:6px 8px; font-size:12px; min-width:120px;" ' +
+            'onchange="handleAssign(\'' + req.id + '\', this.value)">' +
+            '<option value="">Assign...</option>';
+          allCollectors.forEach(function(c) {
+            actionCell += '<option value="' + c.id + '">' + c.name + '</option>';
+          });
+          actionCell += '</select>';
+        } else if (req.status === 'assigned') {
+          actionCell = '<button class="btn-primary" style="padding:6px 12px; font-size:11px;" ' +
+            'onclick="handleComplete(\'' + req.id + '\', \'' + req.userId + '\', \'' + req.wasteType + '\')">COMPLETE</button>';
+        } else {
+          actionCell = '<span style="color:var(--muted); font-size:12px;">Done</span>';
+        }
+
+        html += '<tr>' +
+          '<td style="font-weight:700; font-size:13px;">' + shortId + '</td>' +
+          '<td><span class="' + badgeClass + '">' + req.wasteType + '</span></td>' +
+          '<td style="font-size:13px; max-width:200px; overflow:hidden; text-overflow:ellipsis;">' + (req.locationName || 'Unknown') + '</td>' +
+          '<td style="font-size:13px;">' + scheduled + '</td>' +
+          '<td><span class="' + statusClass + '">' + req.status.toUpperCase() + '</span></td>' +
+          '<td style="font-size:13px;">' + collectorCell + '</td>' +
+          '<td>' + actionCell + '</td>' +
+          '</tr>';
+      });
+
+      tbody.innerHTML = html;
+    }
+
+    async function handleAssign(requestId, collectorId) {
+      if (!collectorId) return;
+
+      try {
+        await assignCollector(requestId, collectorId);
+        showToast('Collector assigned successfully!');
+      } catch (e) {
+        showToast('Error: ' + e.message);
+      }
+    }
+
+    async function handleComplete(requestId, userId, wasteType) {
+      try {
+        await completeRequest(requestId, userId, wasteType);
+        showToast('Request marked as completed! Green Points awarded.');
+      } catch (e) {
+        showToast('Error: ' + e.message);
+      }
+    }
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>

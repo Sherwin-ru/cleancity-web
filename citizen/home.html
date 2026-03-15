@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Citizen Dashboard — Track your waste pickups, scan waste with AI, and earn Green Points.">
+  <title>CleanCity — Dashboard</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="home.html" class="navbar-brand">🌿 CLEANCITY</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="scanner.html">SCAN</a>
+      <a href="schedule.html">SCHEDULE</a>
+      <a href="track.html">TRACK</a>
+      <a href="guide.html">GUIDE</a>
+      <a href="rewards.html">REWARDS</a>
+      <a href="#" id="logout-btn" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <!-- Hero Greeting -->
+    <h1 class="mb-24" id="hero-greeting">HEY THERE! 👋</h1>
+
+    <!-- Green Points Banner -->
+    <div class="hero-banner mb-32">
+      <p style="font-weight:700; font-size:14px; text-transform:uppercase; color:var(--black); margin-bottom:4px;">Your Green Points</p>
+      <div class="points-value" id="green-points">0</div>
+    </div>
+
+    <!-- Quick Actions -->
+    <h2 class="mb-16">QUICK ACTIONS</h2>
+    <div class="grid-2 mb-32">
+      <a href="scanner.html" class="action-card green">
+        <span class="icon">📷</span>
+        <span class="label">Scan Waste</span>
+      </a>
+      <a href="schedule.html" class="action-card blue">
+        <span class="icon">📅</span>
+        <span class="label">Schedule Pickup</span>
+      </a>
+      <a href="track.html" class="action-card yellow">
+        <span class="icon">🚛</span>
+        <span class="label">Track Collector</span>
+      </a>
+      <a href="guide.html" class="action-card">
+        <span class="icon">📖</span>
+        <span class="label">Segregation Guide</span>
+      </a>
+    </div>
+
+    <!-- Recent Requests -->
+    <h2 class="mb-16">RECENT REQUESTS</h2>
+    <div id="recent-requests">
+      <p style="text-align:center; padding: 24px;">Loading requests...</p>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <script>
+    requireAuth(async function(user) {
+      // Get user data
+      var userData = await getUserData(user.id);
+      if (userData) {
+        document.getElementById('hero-greeting').textContent = 'HEY, ' + (userData.name || 'THERE').toUpperCase() + '! 👋';
+        document.getElementById('green-points').textContent = userData.greenPoints || 0;
+      }
+
+      // Load recent requests
+      try {
+        var requests = await getUserRequests(user.id);
+        var container = document.getElementById('recent-requests');
+
+        if (requests.length === 0) {
+          container.innerHTML = '<div class="card text-center"><p>No pickup requests yet. Schedule your first pickup!</p></div>';
+          return;
+        }
+
+        var html = '';
+        requests.slice(0, 5).forEach(function(req) {
+          var badgeClass = req.wasteType === 'Solid' ? 'badge-solid' : (req.wasteType === 'Bio-waste' ? 'badge-bio' : 'badge-ewaste');
+          var statusClass = 'status-' + req.status;
+          var date = req.createdAt ? new Date(req.createdAt.seconds * 1000).toLocaleDateString() : 'N/A';
+
+          html += '<div class="request-row">' +
+            '<span class="' + badgeClass + '">' + req.wasteType + '</span>' +
+            '<span style="flex:1; font-weight:500;">' + (req.locationName || 'Location') + '</span>' +
+            '<span style="font-size:13px; color:var(--muted);">' + date + '</span>' +
+            '<span class="' + statusClass + '">' + req.status.toUpperCase() + '</span>' +
+            '</div>';
+        });
+
+        container.innerHTML = html;
+      } catch (e) {
+        document.getElementById('recent-requests').innerHTML = '<div class="card text-center"><p>Could not load requests. Please try again.</p></div>';
+      }
+    });
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>
