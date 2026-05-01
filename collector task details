@@ -1,1 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Task Detail — View job details, navigate, and upload proof of collection.">
+  <title>CleanCity — Job Details</title>
+  <link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="dashboard.html" class="navbar-brand">🌿 CLEANCITY (DRIVER)</a>
+    <div class="nav-links">
+      <a href="dashboard.html">BACK TO JOBS</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="mb-24" id="task-header">
+      <h1 id="task-title">Loading Job...</h1>
+      <p id="task-subtitle" class="color-muted">Please wait...</p>
+    </div>
+
+    <div class="grid-2">
+      <!-- Details Card -->
+      <div class="section">
+        <h2 class="mb-16">CUSTOMER DETAILS</h2>
+        <div class="card mb-20">
+          <div class="mb-12">
+            <span class="color-muted" style="font-size:12px; text-transform:uppercase;">Customer Name</span>
+            <div id="customer-name" style="font-weight:700; font-size:18px;">...</div>
+          </div>
+          <div class="mb-12">
+            <span class="color-muted" style="font-size:12px; text-transform:uppercase;">Location Name</span>
+            <div id="location-name" style="font-weight:500;">...</div>
+          </div>
+          <div class="mb-20">
+            <span class="color-muted" style="font-size:12px; text-transform:uppercase;">Waste Type</span>
+            <div id="waste-type-display">...</div>
+          </div>
+          <button class="btn-yellow w-full mb-12" id="navigate-btn">🗺️ START NAVIGATION</button>
+        </div>
+      </div>
+
+      <!-- Action Card -->
+      <div class="section">
+        <h2 class="mb-16">TASK COMPLETION</h2>
+        <div class="card">
+          <p class="mb-16" style="font-size:14px;">Please take a photo of the collected waste as proof of completion.</p>
+          
+          <div id="image-upload-area" class="mb-20" style="border:3px dashed var(--black); border-radius:12px; padding:24px; text-align:center; background:#f8f9fa; cursor:pointer;" onclick="document.getElementById('proof-image').click()">
+            <div id="upload-placeholder">
+              <div style="font-size:40px; margin-bottom:12px;">📸</div>
+              <div style="font-weight:700;">Click to Capture/Upload Proof</div>
+              <div style="font-size:12px; color:var(--muted);">JPEG, PNG supported</div>
+            </div>
+            <img id="image-preview" src="#" alt="Preview" style="display:none; width:100%; border-radius:8px; border:2px solid var(--black);">
+          </div>
+          
+          <input type="file" id="proof-image" style="display:none;" accept="image/*" onchange="handleImagePreview(this)">
+          
+          <button class="btn-primary w-full" id="complete-btn" onclick="handleComplete()" disabled>
+            ✅ COMPLETE PICKUP
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+
+  <script>
+    var currentTaskId = new URLSearchParams(window.location.search).get('id');
+    var currentTask = null;
+    var proofBase64 = null;
+
+    requireAuth(async function(user) {
+      if (!currentTaskId) {
+        window.location.href = 'dashboard.html';
+        return;
+      }
+      loadTaskData();
+    });
+
+    async function loadTaskData() {
+      const allReqs = await getAllRequests('all');
+      currentTask = allReqs.find(r => r.id === currentTaskId);
+
+      if (!currentTask) {
+        showToast('Task not found!');
+        setTimeout(() => window.location.href = 'dashboard.html', 2000);
+        return;
+      }
+
+      // Update UI
+      document.getElementById('task-title').textContent = currentTask.wasteType + ' Waste Pickup';
+      document.getElementById('task-subtitle').textContent = 'Request ID: #' + currentTask.id.slice(0, 8);
+      document.getElementById('location-name').textContent = currentTask.locationName || 'Unknown';
+      document.getElementById('waste-type-display').innerHTML = '<span class="badge-blue">' + currentTask.wasteType + '</span>';
+      
+      // Load user data for name
+      const userData = await getUserData(currentTask.userId);
+      document.getElementById('customer-name').textContent = userData ? userData.name : 'Unknown Customer';
+
+      // Navigation Link
+      document.getElementById('navigate-btn').onclick = () => {
+        const url = `https://www.google.com/maps/dir/?api=1&destination=${currentTask.lat},${currentTask.lng}`;
+        window.open(url, '_blank');
+      };
+
+      if (currentTask.status === 'completed') {
+        document.getElementById('complete-btn').textContent = 'COMPLETED';
+        document.getElementById('complete-btn').disabled = true;
+        document.getElementById('image-upload-area').onclick = null;
+        if (currentTask.proofImage) {
+           showPreview(currentTask.proofImage);
+        }
+      }
+    }
+
+    function handleImagePreview(input) {
+      if (input.files && input.files[0]) {
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          proofBase64 = e.target.result;
+          showPreview(proofBase64);
+          document.getElementById('complete-btn').disabled = false;
+        }
+        reader.readAsDataURL(input.files[0]);
+      }
+    }
+
+    function showPreview(src) {
+      document.getElementById('upload-placeholder').style.display = 'none';
+      var preview = document.getElementById('image-preview');
+      preview.src = src;
+      preview.style.display = 'block';
+    }
+
+    async function handleComplete() {
+      if (!proofBase64) {
+        showToast('Please upload an image proof first!');
+        return;
+      }
+
+      var btn = document.getElementById('complete-btn');
+      btn.textContent = 'COMPLETING...';
+      btn.disabled = true;
+
+      try {
+        await completeRequest(currentTask.id, currentTask.userId, currentTask.wasteType, proofBase64);
+        showToast('Job completed successfully! Proof updated.');
+        setTimeout(() => window.location.href = 'dashboard.html', 2000);
+      } catch (e) {
+        showToast('Error: ' + e.message);
+        btn.textContent = '✅ COMPLETE PICKUP';
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>
 
