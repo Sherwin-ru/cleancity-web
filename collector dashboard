@@ -1,0 +1,187 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanCity Collector Dashboard — Manage your assigned waste collection tasks and track live location.">
+  <title>CleanCity — Collector Dashboard</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="dashboard.html" class="navbar-brand">🌿 CLEANCITY (DRIVER)</a>
+    <button class="nav-toggle" onclick="document.querySelector('.nav-links').classList.toggle('open')">☰</button>
+    <div class="nav-links">
+      <a href="dashboard.html" style="background:rgba(255,255,255,0.18);">MY JOBS</a>
+      <a href="#" onclick="handleLogout()">LOGOUT</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="mb-24" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+      <h1>WORKER DASHBOARD</h1>
+      <div id="status-badge" class="badge-bio">ACTIVE / TRACKING</div>
+    </div>
+
+    <!-- Active Tasks -->
+    <div class="section mb-32">
+      <h2 class="mb-16">ASSIGNED PICKUPS</h2>
+      <div id="tasks-container" class="grid-2">
+        <!-- Tasks will be injected here -->
+        <p style="padding:20px; color:var(--muted);">Checking for assigned jobs...</p>
+      </div>
+    </div>
+
+    <!-- Route Overview Map -->
+    <div class="section">
+      <h2 class="mb-16">LIVE MAP & ROUTE</h2>
+      <div id="collector-map" class="map-container" style="height:400px; margin-bottom:12px;"></div>
+      <p style="font-size:12px; color:var(--muted);"> Your location is being updated automatically every 5 seconds. </p>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast-notification" class="toast"></div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="../js/firebase-config.js"></script>
+
+  <script src="../js/auth.js"></script>
+  <script src="../js/database.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="../js/maps.js"></script>
+
+  <script>
+    var currentCollector = null;
+    var map = null;
+    var userMarker = null;
+    var taskMarkers = [];
+    var tasks = [];
+
+    requireAuth(async function(user) {
+      // Find or create collector profile for this user
+      var collectors = await getCollectors();
+      currentCollector = collectors.find(c => c.email === user.email);
+      
+      if (!currentCollector) {
+        // Create a new collector profile if they don't have one
+        currentCollector = {
+          id: user.id, // Use stable Firebase UID
+          userId: user.id,
+          name: user.user_metadata.full_name || user.email.split('@')[0],
+          email: user.email,
+          vehicleNumber: 'TRUCK-' + Math.floor(1000 + Math.random() * 9000),
+          zone: 'Zone-A',
+          isActive: true,
+          currentLat: 20.6 + (Math.random() - 0.5) * 0.1,
+          currentLng: 78.9 + (Math.random() - 0.5) * 0.1
+        };
+        collectors.push(currentCollector);
+        setStorage('collectors', collectors);
+      }
+
+      initCollectorMap();
+      loadTasks();
+      startLocationSimulation();
+      
+      // Refresh tasks every 10 seconds
+      setInterval(loadTasks, 10000);
+    });
+
+    function initCollectorMap() {
+      map = initMap('collector-map', currentCollector.currentLat, currentCollector.currentLng, 13);
+      
+      // Custom icon for collector
+      var truckIcon = L.divIcon({
+          className: 'custom-div-icon',
+          html: "<div style='background:var(--blue); color:white; width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:2px solid var(--black); box-shadow:4px 4px 0 var(--black); font-size:16px;'>🚛</div>",
+          iconSize: [30, 30],
+          iconAnchor: [15, 15]
+      });
+
+      userMarker = L.marker([currentCollector.currentLat, currentCollector.currentLng], { icon: truckIcon }).addTo(map);
+      userMarker.bindPopup("<b>You are here</b><br>" + currentCollector.vehicleNumber).openPopup();
+    }
+
+    async function loadTasks() {
+      tasks = await getCollectorRequests(currentCollector.id);
+      renderTasks();
+      updateMapMarkers();
+    }
+
+    function renderTasks() {
+      var container = document.getElementById('tasks-container');
+      var assignedTasks = tasks.filter(t => t.status === 'assigned');
+
+      if (assignedTasks.length === 0) {
+        container.innerHTML = '<div class="card" style="grid-column: 1 / -1; text-align:center; padding:40px;">' +
+          '<div style="font-size:40px; margin-bottom:12px;">📭</div>' +
+          '<h3 class="mb-8">No jobs assigned</h3>' +
+          '<p class="color-muted">Requests will appear here once the admin assigns them to you.</p>' +
+          '</div>';
+        return;
+      }
+
+      var html = '';
+      assignedTasks.forEach(task => {
+        var badgeClass = task.wasteType === 'Solid' ? 'badge-solid' : (task.wasteType === 'Bio-waste' ? 'badge-bio' : 'badge-ewaste');
+        html += '<div class="card clickable" onclick="window.location.href=\'task-detail.html?id=' + task.id + '\'">' +
+          '<div class="mb-12" style="display:flex; justify-content:space-between; align-items:start;">' +
+          '<div>' +
+          '<div class="badge-blue mb-4" style="font-size:10px;">#' + task.id.slice(0, 8) + '</div>' +
+          '<h3 style="font-size:18px;">' + task.wasteType + ' Waste</h3>' +
+          '</div>' +
+          '<span class="' + badgeClass + '">' + task.wasteType + '</span>' +
+          '</div>' +
+          '<div class="mb-16" style="font-size:14px;">' +
+          '📍 <strong>Location:</strong> ' + (task.locationName || 'Unknown') +
+          '</div>' +
+          '<button class="btn-primary w-full" style="padding:10px;">VIEW DETAILS & START</button>' +
+          '</div>';
+      });
+      container.innerHTML = html;
+    }
+
+    function updateMapMarkers() {
+      // Clear old markers
+      taskMarkers.forEach(m => map.removeLayer(m));
+      taskMarkers = [];
+
+      tasks.filter(t => t.status === 'assigned').forEach(task => {
+        if (task.lat && task.lng) {
+          var m = L.marker([task.lat, task.lng]).addTo(map);
+          m.bindPopup("<b>Pickup Location</b><br>" + task.locationName);
+          taskMarkers.push(m);
+        }
+      });
+    }
+
+    function startLocationSimulation() {
+      // Move slightly every 5 seconds to simulate vehicle movement
+      setInterval(async () => {
+        currentCollector.currentLat += (Math.random() - 0.5) * 0.001;
+        currentCollector.currentLng += (Math.random() - 0.5) * 0.001;
+        
+        // Update marker
+        if (userMarker) {
+          userMarker.setLatLng([currentCollector.currentLat, currentCollector.currentLng]);
+        }
+        
+        // Save to storage
+        await updateCollectorLocation(currentCollector.id, currentCollector.currentLat, currentCollector.currentLng);
+      }, 5000);
+    }
+
+    async function handleLogout() {
+      await logout();
+      window.location.href = '../index.html';
+    }
+  </script>
+</body>
+</html>
